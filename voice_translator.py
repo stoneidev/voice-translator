@@ -40,8 +40,9 @@ class SentenceManager:
         self.min_sentence_interval = 0.1
         self.accumulated_text = ""  # 누적된 텍스트 저장
         self.last_text_time = time.time()  # 마지막 텍스트 수신 시간
-        self.max_wait_time = 4.0  # 최대 대기 시간 (초)
+        self.max_wait_time = 4.0  # 최대 대기 시간 (초) - 실시간성을 위해 1초로 단축
         self.completed_sentences = deque(maxlen=5)  # 완성된 문장 히스토리
+        self.max_accumulated_length = 50  # 누적 텍스트 최대 길이 제한 - 실시간성을 위해 50자로 단축
         
     def add_text(self, text):
         """새로운 텍스트를 컨텍스트에 추가하고 문장 완성도를 확인합니다."""
@@ -81,9 +82,31 @@ class SentenceManager:
             self.accumulated_text = ""
             self.context.clear()
             return True, complete_sentence
+            
+        # 실시간성을 위한 자연스러운 구분점 체크 (30자 이상이고 1초 이상 경과)
+        if len(text) > 30 and time.time() - self.last_text_time > 0.5:
+            # 마침표나 쉼표 뒤에서 자르기
+            natural_break_pattern = re.compile(r'[\.。,，]\s+(?=[가-힣A-Za-z])')
+            matches = list(natural_break_pattern.finditer(text))
+            if matches:
+                # 마지막 구분점에서 자르기
+                last_match = matches[-1]
+                cut_position = last_match.end()
+                complete_sentence = text[:cut_position].strip()
+                self.accumulated_text = text[cut_position:].strip()  # 나머지는 다시 누적
+                self.completed_sentences.append(complete_sentence)
+                return True, complete_sentence
 
-        # 최대 대기 시간 초과 시 강제로 문장 완성 처리 (글자 수 제한 완화)
-        if time.time() - self.last_text_time > self.max_wait_time and len(text) > 2:  # 10 -> 2로 완화
+        # 최대 길이 초과 시 강제로 문장 완성 처리
+        if len(text) > self.max_accumulated_length:
+            complete_sentence = text
+            self.completed_sentences.append(complete_sentence)
+            self.accumulated_text = ""
+            self.context.clear()
+            return True, complete_sentence
+
+        # 최대 대기 시간 초과 시 강제로 문장 완성 처리
+        if time.time() - self.last_text_time > self.max_wait_time and len(text) > 2:
             complete_sentence = text
             self.completed_sentences.append(complete_sentence)
             self.accumulated_text = ""
@@ -100,8 +123,26 @@ class SentenceManager:
         # 누적된 텍스트 사용
         combined_text = self.accumulated_text.strip()
         
+        # 최대 길이 초과 시 즉시 완성 처리 (OpenAI API 호출 전)
+        if len(combined_text) > self.max_accumulated_length:
+            complete_sentence = combined_text
+            self.completed_sentences.append(complete_sentence)
+            self.context.clear()
+            self.accumulated_text = ""
+            return True, complete_sentence
+            
+        # 실시간성을 위해 자연스러운 구분점이 있으면 즉시 완성 처리
+        if len(combined_text) > 30:
+            # 문장 종결 패턴 확인
+            if re.search(r'[다요까죠네습니다합니다됩니다입니다]\.$', combined_text):
+                complete_sentence = combined_text
+                self.completed_sentences.append(complete_sentence)
+                self.context.clear()
+                self.accumulated_text = ""
+                return True, complete_sentence
+        
         # 텍스트가 너무 짧으면 건너뛰기
-        if len(combined_text) < 5:
+        if len(combined_text) < 10:  # 5자에서 10자로 변경하여 너무 자주 API 호출 방지
             return False, ""
         
         # 이전 컨텍스트 준비 (최근 5개까지만 사용)
