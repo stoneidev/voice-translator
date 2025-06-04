@@ -1,0 +1,9 @@
+boto3==1.34.34
+pyaudio==0.2.14
+wave==0.0.2
+python-dotenv==1.0.1
+botocore==1.34.34
+asyncio==3.4.3
+websockets==11.0.3
+amazon-transcribe==0.5.2
+openai==1.12.0

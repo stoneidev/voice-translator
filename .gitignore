@@ -1,0 +1,17 @@
+# 환경 변수 파일
+.env
+
+# Python 가상환경
+bin/
+include/
+lib/
+pyvenv.cfg
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 로그 파일
+*.log
+
+# 기타 불필요한 파일
+.DS_Store
