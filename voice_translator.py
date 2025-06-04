@@ -13,6 +13,7 @@ from amazon_transcribe.client import TranscribeStreamingClient
 from amazon_transcribe.handlers import TranscriptResultStreamHandler
 from amazon_transcribe.model import TranscriptEvent
 from websocket import WebSocketApp
+import re
 
 # .env 파일에서 환경 변수 로드
 load_dotenv()
@@ -39,7 +40,7 @@ class SentenceManager:
         self.min_sentence_interval = 0.1
         self.accumulated_text = ""  # 누적된 텍스트 저장
         self.last_text_time = time.time()  # 마지막 텍스트 수신 시간
-        self.max_wait_time = 2.0  # 최대 대기 시간 (초)
+        self.max_wait_time = 4.0  # 최대 대기 시간 (초)
         self.completed_sentences = deque(maxlen=5)  # 완성된 문장 히스토리
         
     def add_text(self, text):
@@ -52,31 +53,43 @@ class SentenceManager:
         return self.check_sentence_completion()
         
     def check_sentence_completion_simple(self):
-        """간단한 규칙 기반으로 문장 완성도를 확인합니다."""
+        """정규표현식 기반으로 문장 완성도를 더 정교하게 확인합니다."""
         if not self.accumulated_text:
             return False, ""
-            
-        # 문장 종결 어미 확인
-        sentence_endings = ['다.', '요.', '까.', '죠.', '네.', '습니다.', '합니다.', '됩니다.', '입니다.']
-        
-        # 문장이 종결 어미로 끝나는지 확인
+
         text = self.accumulated_text.strip()
-        for ending in sentence_endings:
-            if text.endswith(ending):
-                complete_sentence = text
-                self.completed_sentences.append(complete_sentence)  # 히스토리에 저장
-                self.accumulated_text = ""  # 누적 텍스트 초기화
-                self.context.clear()
-                return True, complete_sentence
-                
-        # 최대 대기 시간 초과 시 강제로 문장 완성 처리
-        if time.time() - self.last_text_time > self.max_wait_time and len(text) > 10:
+        
+        # 물음표로 끝나는 경우 즉시 완성된 문장으로 처리
+        if text.endswith("?"):
             complete_sentence = text
-            self.completed_sentences.append(complete_sentence)  # 히스토리에 저장
-            self.accumulated_text = ""  # 누적 텍스트 초기화
+            self.completed_sentences.append(complete_sentence)
+            self.accumulated_text = ""
             self.context.clear()
             return True, complete_sentence
-            
+
+        # 다양한 종결 어미 및 특수문자 패턴 (의문형 어미 추가)
+        sentence_ending_pattern = re.compile(
+            r"(다|요|까|죠|네|습니다|합니다|됩니다|입니다|군요|네요|랍니다|라요|구나|구요|"
+            r"겠네|겠군요|겠어요|겠습니까|십시오|세요|자|죠|라|렴|구려|구요|지요|"
+            r"ㄹ까|을까|나요|ㄴ가요|ㄴ가|는가|던가)"  # 의문형 어미 추가
+            r"[\s\.!?\)\]\}\"\u2018\u2019\u201c\u201d]*$"  # 유니코드로 따옴표 표현
+        )
+
+        if sentence_ending_pattern.search(text):
+            complete_sentence = text
+            self.completed_sentences.append(complete_sentence)
+            self.accumulated_text = ""
+            self.context.clear()
+            return True, complete_sentence
+
+        # 최대 대기 시간 초과 시 강제로 문장 완성 처리 (글자 수 제한 완화)
+        if time.time() - self.last_text_time > self.max_wait_time and len(text) > 2:  # 10 -> 2로 완화
+            complete_sentence = text
+            self.completed_sentences.append(complete_sentence)
+            self.accumulated_text = ""
+            self.context.clear()
+            return True, complete_sentence
+
         return False, ""
         
     def check_sentence_completion(self):
